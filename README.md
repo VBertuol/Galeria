@@ -15,7 +15,7 @@
 
 Download `Galeria-Setup-<version>.exe` from [Releases](../../releases) and run it. It installs for the current user only (no administrator rights), in `%LOCALAPPDATA%\Programs\Galeria`. The installer offers a checkbox to open Galeria when Windows starts, which adds a shortcut to your Startup folder.
 
-**Uninstall:** Windows Settings → Apps → Galeria → Uninstall. This removes the program, the Startup shortcut, the app's data folder (`%LOCALAPPDATA%\Galeria`) and `Pictures\Galeria`.
+**Uninstall:** Windows Settings → Apps → Galeria → Uninstall. This removes the program, the Startup shortcut, and the app's data folder (`%LOCALAPPDATA%\Galeria`). The last two wallpaper images stay in `Pictures\Galeria`; delete that folder if you want.
 
 If you use Wallpaper Engine or a similar tool, it covers the Windows wallpaper. Pause it to see Galeria.
 
@@ -63,6 +63,6 @@ Free code signing for Windows releases is being requested from [SignPath.io](htt
 
 **Usar:** clique com o botão direito na moldura dourada perto do relógio. **Sobre esta obra** abre a página dela na Wikipédia; **Próxima obra**, **Pausar** e **Trocar a cada** (de 30 segundos a 1 dia) fazem o que dizem.
 
-**Desinstalar:** Configurações do Windows → Aplicativos → Galeria → Desinstalar. Sai tudo: o programa, o atalho de inicialização e os dados.
+**Desinstalar:** Configurações do Windows → Aplicativos → Galeria → Desinstalar. Saem o programa, o atalho de inicialização e os dados; as duas últimas imagens ficam em `Imagens\Galeria`, para você apagar se quiser.
 
 Se você usa o Wallpaper Engine, ele cobre o papel de parede do Windows; pause-o para ver a Galeria.
