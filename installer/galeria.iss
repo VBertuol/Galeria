@@ -10,7 +10,7 @@ AppName=Galeria
 AppVersion={#Versao}
 AppVerName=Galeria {#Versao}
 AppPublisher=Vinicius Bertuol
-AppPublisherURL=https://github.com/viniciusbertuol/galeria
+AppPublisherURL=https://github.com/VBertuol/galeria
 VersionInfoVersion={#Versao}
 VersionInfoProductName=Galeria
 VersionInfoProductVersion={#Versao}
@@ -54,3 +54,5 @@ Filename: "{app}\Galeria.exe"; Description: "{cm:Abrir}"; Flags: nowait postinst
 [UninstallDelete]
 ; estado e cache do programa (config.json, imagens baixadas, papel de parede montado)
 Type: filesandordirs; Name: "{localappdata}\Galeria"
+; o papel de parede atual e o anterior
+Type: filesandordirs; Name: "{userpics}\Galeria"

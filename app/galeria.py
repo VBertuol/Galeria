@@ -2,8 +2,9 @@
 
 Fica na bandeja (perto do relógio). Menu: próxima obra, sobre esta obra, pausar, intervalo, sair.
 Abrir com o Windows é opção do instalador (atalho na pasta Inicializar), não do programa: um programa
-que se registra sozinho para iniciar e troca o papel de parede imita ransomware, e o antivírus bloqueia. As obras vêm da lista curada `acervo.json` e as imagens são
-baixadas do Wikimedia Commons na hora, no tamanho da tela, e guardadas num cache pequeno.
+que se registra sozinho para iniciar e troca o papel de parede imita ransomware, e o antivírus bloqueia.
+As obras vêm da lista curada `acervo.json` e as imagens são baixadas do Wikimedia Commons na hora, no
+tamanho da tela, e guardadas num cache pequeno.
 """
 import ctypes
 import json
@@ -14,7 +15,7 @@ import sys
 import threading
 import time
 import webbrowser
-from ctypes import wintypes
+from ctypes import HRESULT, POINTER, WINFUNCTYPE, byref, c_void_p, wintypes
 from pathlib import Path
 from urllib.parse import quote
 
@@ -25,15 +26,17 @@ from PIL import Image, ImageDraw
 from compor import TOLERANCIA_CORTE, compor
 
 NOME = "Galeria"
-VERSAO = "1.0.0"
+VERSAO = "1.0.2"
 UA = {"User-Agent": "Galeria/1.0 (papel de parede com arte em dominio publico)"}
 BASE = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 PASTA = Path(os.environ.get("LOCALAPPDATA", Path.home())) / NOME
 CACHE = PASTA / "cache"
 CONFIG = PASTA / "config.json"
 MAX_CACHE = 40  # imagens guardadas para funcionar sem internet
-INTERVALOS = [(5, "5 minutos"), (15, "15 minutos"), (30, "30 minutos"), (60, "1 hora"),
-              (180, "3 horas"), (1440, "1 dia")]
+# em segundos
+INTERVALOS = [(30, "30 segundos"), (60, "1 minuto"), (120, "2 minutos"), (300, "5 minutos"),
+              (900, "15 minutos"), (1800, "30 minutos"), (3600, "1 hora"), (10800, "3 horas"),
+              (86400, "1 dia")]
 
 
 # ---------- Windows ----------
@@ -51,12 +54,56 @@ def tela_e_area():
     return (W, H), (r.left, r.top, r.right, r.bottom)
 
 
+def _guid(texto):
+    class GUID(ctypes.Structure):
+        _fields_ = [("d1", wintypes.DWORD), ("d2", wintypes.WORD), ("d3", wintypes.WORD), ("d4", ctypes.c_ubyte * 8)]
+    g = GUID()
+    ctypes.oledll.ole32.CLSIDFromString(texto, byref(g))
+    return g
+
+
+def pasta_imagens():
+    """A pasta Imagens do usuário, onde o Windows está mesmo (pode ter sido movida, pelo OneDrive por exemplo)."""
+    p = ctypes.c_wchar_p()
+    try:
+        ctypes.oledll.shell32.SHGetKnownFolderPath(byref(_guid("{33E28130-4E1E-4676-835A-98395C3BC3BB}")),  # Pictures
+                                                   0, None, byref(p))
+        return Path(p.value)
+    except OSError:
+        return Path.home() / "Pictures"
+    finally:
+        ctypes.windll.ole32.CoTaskMemFree(p)
+
+
 def aplicar_papel(caminho):
-    # A imagem já sai no tamanho exato da tela, então qualquer estilo do Windows (preencher, centralizar,
-    # lado a lado) mostra igual; não mexer no estilo é uma alteração de sistema a menos.
-    # SPI_SETDESKWALLPAPER, gravando no perfil e avisando as janelas
-    if not ctypes.windll.user32.SystemParametersInfoW(20, 0, str(caminho), 3):
-        raise OSError("o Windows recusou o papel de parede")
+    """Pede ao Explorer, pela interface IDesktopWallpaper, para pôr a imagem como papel de parede.
+
+    Medido em 2026-10-15 no PC do Vinicius: o SystemParametersInfo devolvia sucesso e o Windows não
+    trocava nada, porque o fundo tinha ficado em "cor sólida" (o Wallpaper Engine deixa assim) e porque
+    o Windows reaproveita a cópia guardada de um caminho que ele já conhece. Por isso: Enable(TRUE)
+    religa o modo imagem, e cada obra vai num arquivo de nome novo. A imagem já sai no tamanho exato
+    da tela, então o estilo (preencher, centralizar) não importa e não se mexe nele."""
+    ole = ctypes.oledll.ole32
+    ole.CoInitialize(None)
+    ptr = c_void_p()
+    try:
+        ole.CoCreateInstance(byref(_guid("{C2CF3110-460E-4fc1-B9D0-8A1C0C9CC4BD}")), None, 0x17,
+                             byref(_guid("{B92B56A9-8B55-4E14-9A89-0199BBB6F93B}")), byref(ptr))
+        vtbl = ctypes.cast(ptr, POINTER(POINTER(c_void_p))).contents
+        set_wallpaper = WINFUNCTYPE(HRESULT, c_void_p, wintypes.LPCWSTR, wintypes.LPCWSTR)(vtbl[3])
+        enable = WINFUNCTYPE(HRESULT, c_void_p, wintypes.BOOL)(vtbl[18])
+        release = WINFUNCTYPE(wintypes.ULONG, c_void_p)(vtbl[2])
+        try:
+            enable(ptr, True)
+            set_wallpaper(ptr, None, str(caminho))
+        finally:
+            release(ptr)
+    except OSError:
+        # sem a interface (Windows antigo): o caminho clássico
+        if not ctypes.windll.user32.SystemParametersInfoW(20, 0, str(caminho), 3):
+            raise OSError("o Windows recusou o papel de parede")
+    finally:
+        ole.CoUninitialize()
 
 
 def uma_instancia():
@@ -67,11 +114,13 @@ def uma_instancia():
 # ---------- estado ----------
 
 def ler_config():
-    padrao = {"intervalo": 30, "pausado": False, "fila": [], "atual": None}
+    padrao = {"segundos": 1800, "pausado": False, "fila": [], "atual": None}
     try:
-        padrao.update(json.loads(CONFIG.read_text(encoding="utf-8")))
+        padrao.update(json.loads(CONFIG.read_text(encoding="utf-8-sig")))
     except (OSError, ValueError):
         pass
+    if "intervalo" in padrao:  # a 1.0.0 guardava minutos
+        padrao["segundos"] = padrao.pop("intervalo") * 60
     return padrao
 
 
@@ -124,10 +173,10 @@ class Galeria:
         self.acervo = {o["id"]: o for o in json.loads((BASE / "acervo.json").read_text(encoding="utf-8"))}
         self.cfg = ler_config()
         self.trava = threading.Lock()
-        self.acordar = threading.Event()
+        self.acordar = threading.Event()  # "Próxima obra": troca na hora
+        self.recontar = threading.Event()  # intervalo mudou: recomeça a contagem sem trocar
         self.saindo = False
         self.icone = None
-        self.proxima_em = 0
 
     # baralho: todas as obras passam uma vez antes de repetir
     def sortear(self):
@@ -158,11 +207,16 @@ class Galeria:
                     return
                 obra = random.choice(guardadas)
                 origem = em_cache(obra)
-            # o Windows guarda o papel pelo caminho: alternar o nome força a troca
-            destino = PASTA / ("papel-a.jpg" if self.cfg.get("ultimo") != "papel-a.jpg" else "papel-b.jpg")
+            # Em Imagens\Galeria, e não em AppData: no PC dele o Explorer respondia "arquivo não
+            # encontrado" para imagem nova em AppData e lia normal de Imagens. Nome novo a cada obra,
+            # porque o Windows reaproveita a cópia guardada de um caminho que ele já conhece.
+            pasta = pasta_imagens() / NOME
+            pasta.mkdir(parents=True, exist_ok=True)
+            destino = pasta / f"galeria-{time.strftime('%Y%m%d-%H%M%S')}-{obra['id']}.jpg"
             compor(origem, obra, tela, area, destino)
             aplicar_papel(destino)
-            self.cfg["ultimo"] = destino.name
+            for velho in sorted(pasta.glob("galeria-*.jpg"))[:-2]:  # fica a atual e a anterior
+                velho.unlink(missing_ok=True)
             self.cfg["atual"] = obra["id"]
             gravar_config(self.cfg)
             self.atualizar_icone()
@@ -190,11 +244,16 @@ class Galeria:
         if not self.cfg.get("atual") or not self.cfg["pausado"]:
             self.trocar_seguro()
         while not self.saindo:
-            self.proxima_em = time.time() + self.cfg["intervalo"] * 60
-            pedido = self.acordar.wait(self.cfg["intervalo"] * 60)
-            self.acordar.clear()
+            fim = time.time() + self.cfg["segundos"]
+            while not (self.saindo or self.acordar.is_set()) and time.time() < fim:
+                time.sleep(0.25)
+                if self.recontar.is_set():
+                    self.recontar.clear()
+                    fim = time.time() + self.cfg["segundos"]
             if self.saindo:
                 break
+            pedido = self.acordar.is_set()
+            self.acordar.clear()
             if pedido or not self.cfg["pausado"]:
                 self.trocar_seguro()
 
@@ -203,14 +262,18 @@ class Galeria:
             self.trocar()
         except Exception as e:
             self.dizer(f"Não consegui trocar a obra: {e}")
+            import traceback
+            with open(PASTA / "erros.log", "a", encoding="utf-8") as f:
+                f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + traceback.format_exc() + "\n")
 
     # ---------- menu ----------
     def menu(self):
-        def intervalo(minutos, rotulo):
+        def intervalo(segundos, rotulo):
             def acao(icone, item):
-                self.cfg["intervalo"] = minutos
+                self.cfg["segundos"] = segundos
                 gravar_config(self.cfg)
-            return pystray.MenuItem(rotulo, acao, checked=lambda item: self.cfg["intervalo"] == minutos, radio=True)
+                self.recontar.set()  # o novo intervalo vale já, sem esperar o antigo acabar
+            return pystray.MenuItem(rotulo, acao, checked=lambda item: self.cfg["segundos"] == segundos, radio=True)
 
         def titulo_atual(item):
             o = self.atual()
