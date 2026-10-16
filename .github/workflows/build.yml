@@ -32,11 +32,21 @@ jobs:
         shell: cmd
         run: build.cmd
 
+      - name: Checksum
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -Filter 'Galeria-Setup-*.exe' | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$h  $($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding ascii
+          }
+
       - uses: actions/upload-artifact@v4
         id: instalador
         with:
           name: Galeria-Setup
-          path: dist/Galeria-Setup-*.exe
+          path: |
+            dist/Galeria-Setup-*.exe
+            dist/Galeria-Setup-*.exe.sha256
           if-no-files-found: error
 
       # Depois da aprovação do SignPath Foundation, entra aqui o passo de assinatura
@@ -46,4 +56,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Galeria-Setup-*.exe
+          files: |
+            dist/Galeria-Setup-*.exe
+            dist/Galeria-Setup-*.exe.sha256
+          body: |
+            Built by GitHub Actions from this repository: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Windows may show "Windows protected your PC" because the installer is not code-signed yet: click **More info** → **Run anyway**. Check the download with the `.sha256` file (`Get-FileHash`).

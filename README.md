@@ -1,12 +1,14 @@
 # Galeria
 
+![Galeria changing the desktop wallpaper: six paintings, each with its caption in a different language](docs/preview.gif)
+
 **Galeria** is a small Windows tray app that turns your desktop wallpaper into a rotating gallery of public-domain paintings. Every few minutes it shows a new artwork, at your screen's resolution, with the title, artist, date and museum written in a corner. You learn about art passively, just by looking at your desktop.
 
 *Português abaixo.*
 
 ## Features
 
-- 976 well-known paintings (Bruegel, Leonardo, Vermeer, Rembrandt, Van Gogh, Klimt...), every one in the public domain and close to 4K resolution. Each one is shown once before any repeats.
+- 975 well-known paintings (Bruegel, Leonardo, Vermeer, Rembrandt, Van Gogh, Klimt...), every one in the public domain and close to 4K resolution. Each one is shown once before any repeats.
 - The image is composed at your monitor's exact resolution. Artworks whose shape doesn't match the screen are shown whole over a blurred background made from the same painting.
 - Tray menu: **About this artwork** (opens its Wikipedia page), **Next artwork**, **Pause**, **Change every** (30 seconds to 1 day), **Quit**.
 - The last 40 images are cached, so it keeps working offline.
@@ -19,6 +21,16 @@ Download `Galeria-Setup-<version>.exe` from [Releases](../../releases) and run i
 **Uninstall:** Windows Settings → Apps → Galeria → Uninstall. This removes the program, the Startup shortcut, and the app's data folder (`%LOCALAPPDATA%\Galeria`). The last two wallpaper images stay in `Pictures\Galeria`; delete that folder if you want.
 
 If you use Wallpaper Engine or a similar tool, it covers the Windows wallpaper. Pause it to see Galeria.
+
+### "Windows protected your PC" and antivirus warnings
+
+Galeria is not code-signed yet (free signing has been requested from [SignPath Foundation](https://signpath.org)). Until it is, Windows SmartScreen shows a blue **"Windows protected your PC"** screen the first time you run the installer, because the file is new and unsigned. Click **More info**, then **Run anyway**.
+
+Some antivirus programs may also flag it. Their behavior engines are suspicious of any unknown, unsigned program that changes the wallpaper and offers to start with Windows, which is exactly what Galeria does. You don't have to take our word for it:
+
+- The installer is built by GitHub Actions straight from this repository ([workflow](.github/workflows/build.yml)); every release links to the run that built it.
+- Each release has a `.sha256` file. Check that your download matches it in PowerShell: `Get-FileHash .\Galeria-Setup-<version>.exe` and compare the hash.
+- The program only talks to Wikimedia Commons, to download images. It sends nothing about you anywhere (see [Privacy](#privacy)).
 
 ## How it works
 
@@ -61,6 +73,8 @@ Free code signing for Windows releases is being requested from [SignPath.io](htt
 **Galeria** troca o papel de parede do Windows por pinturas em domínio público. A cada intervalo entra uma obra nova, no tamanho exato da tela, com nome, artista, data e museu escritos num canto. Você conhece arte sem esforço, só de olhar a área de trabalho.
 
 **Instalar:** baixe o `Galeria-Setup-<versão>.exe` em [Releases](../../releases) e rode. Instala só para o seu usuário, sem pedir administrador. O instalador tem uma caixa para abrir a Galeria quando o Windows iniciar.
+
+**Aviso "O Windows protegeu o computador":** o programa ainda não tem assinatura digital (pedida ao SignPath Foundation), então o Windows mostra essa tela azul na primeira vez. Clique em **Mais informações** e depois em **Executar assim mesmo**. Algum antivírus também pode reclamar, pelo mesmo motivo; o instalador é compilado pelo GitHub a partir deste código, e cada versão tem o arquivo `.sha256` para conferir o download.
 
 **Usar:** clique com o botão direito na moldura dourada perto do relógio. O programa vem em inglês; troque em **Language** para português ou outra das 11 línguas. **Sobre esta obra** abre a página dela na Wikipédia; **Próxima obra**, **Pausar** e **Trocar a cada** (de 30 segundos a 1 dia) fazem o que dizem.
 
