@@ -11,6 +11,7 @@ Uso: python tools/curar.py [--min-sitelinks 12] [--saida app/acervo.json]
 """
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -53,6 +54,17 @@ def sparql(consulta):
     sys.exit("wikidata não respondeu em 4 tentativas")
 
 
+# As línguas do programa e, para cada uma, a ordem de busca do rótulo no Wikidata.
+LINGUAS = {
+    "en": ["en"], "pt": ["pt-br", "pt"], "es": ["es"], "fr": ["fr"], "de": ["de"], "it": ["it"],
+    "zh": ["zh-hans", "zh-cn", "zh", "zh-sg", "zh-hant", "zh-tw", "zh-hk"], "ja": ["ja"], "ar": ["ar"],
+    "ko": ["ko"], "ru": ["ru"],
+}
+TODAS = sorted({v for vs in LINGUAS.values() for v in vs})
+# Wikipédia de cada língua; a chinesa abre em caracteres simplificados.
+WIKI = {l: (f"https://zh.wikipedia.org/zh-cn/" if l == "zh" else f"https://{l}.wikipedia.org/wiki/") for l in LINGUAS}
+
+
 def entidades(ids, props="labels|claims|sitelinks"):
     """wbgetentities, 50 por pedido. A consulta SPARQL com tudo junto estoura o tempo do servidor."""
     out = {}
@@ -60,19 +72,63 @@ def entidades(ids, props="labels|claims|sitelinks"):
     for i in range(0, len(ids), 50):
         r = requests.get("https://www.wikidata.org/w/api.php", headers=UA, timeout=120, params={
             "action": "wbgetentities", "format": "json", "ids": "|".join(ids[i:i + 50]),
-            "props": props, "languages": "pt-br|pt|en", "sitefilter": "ptwiki|enwiki"})
+            "props": props, "languages": "|".join(TODAS),
+            "sitefilter": "|".join(f"{l}wiki" for l in LINGUAS)})
         r.raise_for_status()
         out.update(r.json().get("entities", {}))
         time.sleep(0.3)
     return out
 
 
-def rotulo(e):
+def rotulos(e):
+    """{língua: rótulo} só das línguas que o Wikidata tem; o programa cai no inglês quando falta."""
     lb = e.get("labels", {})
-    for lang in ("pt-br", "pt", "en"):
-        if lang in lb:
-            return lb[lang]["value"]
-    return None
+    out = {}
+    for lingua, ordem in LINGUAS.items():
+        for v in ordem:
+            if v in lb:
+                out[lingua] = lb[v]["value"]
+                break
+    return out
+
+
+# Desambiguador que o Wikidata às vezes põe no rótulo: "Torre de Babel (pintura)". Só sai quando o
+# parêntese diz "pintura" em alguma língua; "(1887)" ou "(Viena)" ficam.
+PINTURA = re.compile(r"\s*[(（]\s*(painting|pintura|quadro|tableau|peinture|gemälde|dipinto|quadro|картина"
+                     r"|لوحة|絵画|그림|画作|绘画|繪畫|油画|油畫)\s*[)）]$", re.I)
+
+
+DESAMBIGUADOR = re.compile(r"\s*[(（]([^()（）]*)[)）]\s*$")
+SERIE = re.compile(r"series|serie|série|serie|серия|سلسلة|系列|シリーズ|연작|картина|painting|لوحة|畫作|畫|絵画|の絵画", re.I)
+
+
+def sem_pintor(titulos, criadores):
+    """Tira do fim do título o parêntese que só repete o pintor ou diz "série"/"pintura":
+    "Judite (卡拉瓦乔)", "Даная (картина Тициана)". A legenda já mostra o pintor na linha de baixo."""
+    out = {}
+    for lingua, t in titulos.items():
+        m = DESAMBIGUADOR.search(t)
+        if m:
+            dentro = m.group(1)
+            nomes = [c["nome"].get(lingua, "") for c in criadores.values()]
+            # sobrenome com 4 letras basta para casar a forma flexionada (Тициан / Тициана)
+            raizes = [w[:4] for n in nomes for w in re.split(r"[\s·・,]+", n) if len(w) >= 4]
+            if SERIE.search(dentro) or any(dentro in n or n in dentro for n in nomes if n) \
+                    or any(r in dentro for r in raizes):
+                t = t[:m.start()].strip() or t
+        out[lingua] = t
+    return out
+
+
+def titulo_por_lingua(e):
+    """Rótulo do Wikidata; onde falta, o título do artigo da Wikipédia daquela língua, sem o
+    desambiguador do fim ("A Torre de Babel (Bruegel)" vira "A Torre de Babel")."""
+    out = {l: PINTURA.sub("", t) or t for l, t in rotulos(e).items()}
+    for lingua in LINGUAS:
+        artigo = e.get("sitelinks", {}).get(f"{lingua}wiki")
+        if lingua not in out and artigo:
+            out[lingua] = re.sub(r"\s*[(（][^()（）]*[)）]$", "", artigo["title"]).strip() or artigo["title"]
+    return out
 
 
 def valores(e, prop):
@@ -124,18 +180,16 @@ def agrupar(linhas):
         for v in valores(e, "P170"):
             c = ce.get(v["id"], {})
             mortes = [m for m in (ano_de(x) for x in valores(c, "P570")) if m is not None]
-            crs[v["id"]] = {"nome": rotulo(c), "morte": max(mortes) if mortes else None}
+            crs[v["id"]] = {"nome": rotulos(c), "morte": max(mortes) if mortes else None}
         col = colecao_atual(e)
         site = e.get("sitelinks", {})
-        lb = e.get("labels", {})
         obras[q] = {
             "id": q, "sitelinks": sl[q], "imagem": imgs[0], "criadores": crs,
             "anos": {a for a in (ano_de(x) for x in valores(e, "P571")) if a is not None},
-            "colecoes": {col: rotulo(co.get(col, {}))} if col else {},
-            "titulo_pt": (lb.get("pt-br") or lb.get("pt") or {}).get("value"),
-            "titulo_en": (lb.get("en") or {}).get("value"),
-            "ptwiki": "https://pt.wikipedia.org/wiki/" + site["ptwiki"]["title"].replace(" ", "_") if "ptwiki" in site else None,
-            "enwiki": "https://en.wikipedia.org/wiki/" + site["enwiki"]["title"].replace(" ", "_") if "enwiki" in site else None,
+            "museu": rotulos(co.get(col, {})) if col else {},
+            "titulo": sem_pintor(titulo_por_lingua(e), crs),
+            "links": {l: WIKI[l] + site[f"{l}wiki"]["title"].replace(" ", "_")
+                      for l in LINGUAS if f"{l}wiki" in site},
         }
     return obras
 
@@ -213,25 +267,24 @@ def main():
         if min(3840 / w, 2160 / h) > 1 / 0.75:
             motivos["resolução baixa"] += 1
             continue
-        titulo = o["titulo_pt"] or o["titulo_en"]
-        if not titulo or titulo == o["id"]:
+        if "en" not in o["titulo"]:  # o inglês é a língua padrão e o último recurso
             motivos["sem título"] += 1
             continue
-        nomes = [c["nome"] for c in o["criadores"].values() if c["nome"]]
+        artistas = [c["nome"] for c in o["criadores"].values() if c["nome"]]
         anos = sorted(o["anos"])
         data = None
         if anos:
             data = str(anos[0]) if anos[0] == anos[-1] else f"{anos[0]}–{anos[-1]}"
         acervo.append({
             "id": o["id"],
-            "titulo": titulo,
-            "artista": " e ".join(nomes) if nomes else "Autor desconhecido",
+            "titulo": o["titulo"],
+            "artistas": artistas,  # lista vazia = autor desconhecido, que o programa escreve na língua
             "data": data,
-            "museu": next(iter(o["colecoes"].values()), None),
+            "museu": o["museu"] or None,
             "arquivo": o["arquivo"],
             "largura": w,
             "altura": h,
-            "link": o["ptwiki"] or o["enwiki"] or f"https://www.wikidata.org/wiki/{o['id']}",
+            "links": o["links"] or {"en": f"https://www.wikidata.org/wiki/{o['id']}"},
             "fama": o["sitelinks"],
         })
     acervo.sort(key=lambda a: -a["fama"])
@@ -239,10 +292,11 @@ def main():
     # e na tela parece erro de cadastro. Mesmo título com outro autor conhecido fica (Adão e Eva).
     vistos, final = set(), []
     for a in acervo:
-        if a["titulo"].casefold() in vistos and a["artista"] == "Autor desconhecido":
+        titulos = {(l, t.casefold()) for l, t in a["titulo"].items()}
+        if titulos & vistos and not a["artistas"]:
             motivos["cópia anônima de título famoso"] = motivos.get("cópia anônima de título famoso", 0) + 1
             continue
-        vistos.add(a["titulo"].casefold())
+        vistos |= titulos
         final.append(a)
     acervo = final
 

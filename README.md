@@ -10,6 +10,7 @@
 - The image is composed at your monitor's exact resolution. Artworks whose shape doesn't match the screen are shown whole over a blurred background made from the same painting.
 - Tray menu: **About this artwork** (opens its Wikipedia page), **Next artwork**, **Pause**, **Change every** (30 seconds to 1 day), **Quit**.
 - The last 40 images are cached, so it keeps working offline.
+- 11 languages for menus and captions: English (default), Português, Español, Français, Deutsch, Italiano, 中文, 日本語, العربية, 한국어, Русский. Change it in the tray menu under **Language**. Artwork titles, artists and museums come from Wikidata in the chosen language; when Wikidata has no translation, the English name is shown.
 
 ## Install
 
@@ -61,7 +62,7 @@ Free code signing for Windows releases is being requested from [SignPath.io](htt
 
 **Instalar:** baixe o `Galeria-Setup-<versão>.exe` em [Releases](../../releases) e rode. Instala só para o seu usuário, sem pedir administrador. O instalador tem uma caixa para abrir a Galeria quando o Windows iniciar.
 
-**Usar:** clique com o botão direito na moldura dourada perto do relógio. **Sobre esta obra** abre a página dela na Wikipédia; **Próxima obra**, **Pausar** e **Trocar a cada** (de 30 segundos a 1 dia) fazem o que dizem.
+**Usar:** clique com o botão direito na moldura dourada perto do relógio. O programa vem em inglês; troque em **Language** para português ou outra das 11 línguas. **Sobre esta obra** abre a página dela na Wikipédia; **Próxima obra**, **Pausar** e **Trocar a cada** (de 30 segundos a 1 dia) fazem o que dizem.
 
 **Desinstalar:** Configurações do Windows → Aplicativos → Galeria → Desinstalar. Saem o programa, o atalho de inicialização e os dados; as duas últimas imagens ficam em `Imagens\Galeria`, para você apagar se quiser.
 

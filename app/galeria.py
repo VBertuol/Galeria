@@ -23,20 +23,19 @@ import pystray
 import requests
 from PIL import Image, ImageDraw
 
+import textos
 from compor import TOLERANCIA_CORTE, compor
 
 NOME = "Galeria"
-VERSAO = "1.0.2"
+VERSAO = "1.1.0"
 UA = {"User-Agent": "Galeria/1.0 (papel de parede com arte em dominio publico)"}
 BASE = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 PASTA = Path(os.environ.get("LOCALAPPDATA", Path.home())) / NOME
 CACHE = PASTA / "cache"
 CONFIG = PASTA / "config.json"
 MAX_CACHE = 40  # imagens guardadas para funcionar sem internet
-# em segundos
-INTERVALOS = [(30, "30 segundos"), (60, "1 minuto"), (120, "2 minutos"), (300, "5 minutos"),
-              (900, "15 minutos"), (1800, "30 minutos"), (3600, "1 hora"), (10800, "3 horas"),
-              (86400, "1 dia")]
+# em segundos; os rótulos de cada língua estão em textos.py, na mesma ordem
+INTERVALOS = [30, 60, 120, 300, 900, 1800, 3600, 10800, 86400]
 
 
 # ---------- Windows ----------
@@ -114,7 +113,7 @@ def uma_instancia():
 # ---------- estado ----------
 
 def ler_config():
-    padrao = {"segundos": 1800, "pausado": False, "fila": [], "atual": None}
+    padrao = {"segundos": 1800, "pausado": False, "fila": [], "atual": None, "lingua": textos.PADRAO}
     try:
         padrao.update(json.loads(CONFIG.read_text(encoding="utf-8-sig")))
     except (OSError, ValueError):
@@ -203,23 +202,52 @@ class Galeria:
                 # sem internet: roda o que estiver guardado
                 guardadas = [o for o in self.acervo.values() if em_cache(o)]
                 if not guardadas:
-                    self.dizer("Sem internet e nenhuma obra guardada ainda.")
+                    self.dizer(self.t("sem_internet"))
                     return
                 obra = random.choice(guardadas)
                 origem = em_cache(obra)
-            # Em Imagens\Galeria, e não em AppData: no PC dele o Explorer respondia "arquivo não
-            # encontrado" para imagem nova em AppData e lia normal de Imagens. Nome novo a cada obra,
-            # porque o Windows reaproveita a cópia guardada de um caminho que ele já conhece.
-            pasta = pasta_imagens() / NOME
-            pasta.mkdir(parents=True, exist_ok=True)
-            destino = pasta / f"galeria-{time.strftime('%Y%m%d-%H%M%S')}-{obra['id']}.jpg"
-            compor(origem, obra, tela, area, destino)
-            aplicar_papel(destino)
-            for velho in sorted(pasta.glob("galeria-*.jpg"))[:-2]:  # fica a atual e a anterior
-                velho.unlink(missing_ok=True)
-            self.cfg["atual"] = obra["id"]
-            gravar_config(self.cfg)
-            self.atualizar_icone()
+            self.mostrar(obra, origem, tela, area)
+
+    def redesenhar(self):
+        """Mesma obra, legenda em outra língua (quando a pessoa troca o idioma no menu)."""
+        with self.trava:
+            obra = self.atual()
+            if not obra:
+                return
+            tela, area = tela_e_area()
+            origem = em_cache(obra) or baixar(obra, tela)
+            self.mostrar(obra, origem, tela, area)
+
+    def mostrar(self, obra, origem, tela, area):
+        # Em Imagens\Galeria, e não em AppData: no PC dele o Explorer respondia "arquivo não
+        # encontrado" para imagem nova em AppData e lia normal de Imagens. Nome novo a cada obra,
+        # porque o Windows reaproveita a cópia guardada de um caminho que ele já conhece.
+        pasta = pasta_imagens() / NOME
+        pasta.mkdir(parents=True, exist_ok=True)
+        destino = pasta / f"galeria-{time.strftime('%Y%m%d-%H%M%S')}-{obra['id']}.jpg"
+        compor(origem, self.legenda(obra), tela, area, destino)
+        aplicar_papel(destino)
+        for velho in sorted(pasta.glob("galeria-*.jpg"))[:-2]:  # fica a atual e a anterior
+            velho.unlink(missing_ok=True)
+        self.cfg["atual"] = obra["id"]
+        gravar_config(self.cfg)
+        self.atualizar_icone()
+
+    # ---------- língua ----------
+    def lingua(self):
+        return self.cfg.get("lingua", textos.PADRAO)
+
+    def t(self, chave):
+        return textos.t(self.lingua(), chave)
+
+    def legenda(self, obra):
+        l = self.lingua()
+        sep = textos.separador(l)
+        autor = sep.join(textos.da_obra(a, l) for a in obra["artistas"]) or self.t("desconhecido")
+        if obra.get("data"):
+            autor += sep + obra["data"]
+        return {"titulo": textos.da_obra(obra["titulo"], l), "autor": autor,
+                "museu": textos.da_obra(obra.get("museu"), l), "lingua": l}
 
     def atual(self):
         return self.acervo.get(self.cfg.get("atual"))
@@ -235,7 +263,11 @@ class Galeria:
         if not self.icone:
             return
         o = self.atual()
-        dica = f"{o['titulo']} ({o['artista']})" if o else NOME
+        if o:
+            leg = self.legenda(o)
+            dica = f"{leg['titulo']} ({leg['autor']})"
+        else:
+            dica = NOME
         self.icone.title = dica[:127]
         self.icone.update_menu()
 
@@ -257,43 +289,63 @@ class Galeria:
             if pedido or not self.cfg["pausado"]:
                 self.trocar_seguro()
 
-    def trocar_seguro(self):
+    def seguro(self, funcao):
         try:
-            self.trocar()
+            funcao()
         except Exception as e:
-            self.dizer(f"Não consegui trocar a obra: {e}")
+            self.dizer(self.t("erro").format(erro=e))
             import traceback
             with open(PASTA / "erros.log", "a", encoding="utf-8") as f:
                 f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + traceback.format_exc() + "\n")
 
+    def trocar_seguro(self):
+        self.seguro(self.trocar)
+
     # ---------- menu ----------
+    # Todo rótulo é função, para o menu mudar de língua na hora, sem reiniciar.
     def menu(self):
-        def intervalo(segundos, rotulo):
+        def intervalo(i, segundos):
             def acao(icone, item):
                 self.cfg["segundos"] = segundos
                 gravar_config(self.cfg)
                 self.recontar.set()  # o novo intervalo vale já, sem esperar o antigo acabar
-            return pystray.MenuItem(rotulo, acao, checked=lambda item: self.cfg["segundos"] == segundos, radio=True)
+            return pystray.MenuItem(lambda item: self.t("intervalos")[i], acao,
+                                    checked=lambda item: self.cfg["segundos"] == segundos, radio=True)
+
+        def lingua(codigo, nome):
+            def acao(icone, item):
+                self.cfg["lingua"] = codigo
+                gravar_config(self.cfg)
+                self.atualizar_icone()
+                threading.Thread(target=self.seguro, args=(self.redesenhar,), daemon=True).start()
+            return pystray.MenuItem(nome, acao, checked=lambda item: self.lingua() == codigo, radio=True)
 
         def titulo_atual(item):
             o = self.atual()
-            return o["titulo"] if o else "Nenhuma obra ainda"
+            return textos.da_obra(o["titulo"], self.lingua()) if o else self.t("nenhuma")
+
+        def rotulo_lingua(item):
+            # "Language" vai junto em toda língua, para quem caiu numa que não lê achar o caminho de volta
+            nome = self.t("lingua")
+            return nome if self.lingua() == "en" else f"{nome} (Language)"
 
         return pystray.Menu(
             pystray.MenuItem(titulo_atual, None, enabled=False),
-            pystray.MenuItem("Sobre esta obra", self.sobre, default=True),
-            pystray.MenuItem("Próxima obra", lambda i, it: self.acordar.set()),
+            pystray.MenuItem(lambda item: self.t("sobre"), self.sobre, default=True),
+            pystray.MenuItem(lambda item: self.t("proxima"), lambda i, it: self.acordar.set()),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Pausar", self.pausar, checked=lambda item: self.cfg["pausado"]),
-            pystray.MenuItem("Trocar a cada", pystray.Menu(*[intervalo(m, r) for m, r in INTERVALOS])),
+            pystray.MenuItem(lambda item: self.t("pausar"), self.pausar, checked=lambda item: self.cfg["pausado"]),
+            pystray.MenuItem(lambda item: self.t("trocar"),
+                             pystray.Menu(*[intervalo(i, s) for i, s in enumerate(INTERVALOS)])),
+            pystray.MenuItem(rotulo_lingua, pystray.Menu(*[lingua(c, n) for c, n in textos.LINGUAS])),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Sair", self.sair),
+            pystray.MenuItem(lambda item: self.t("sair"), self.sair),
         )
 
     def sobre(self, icone=None, item=None):
         o = self.atual()
         if o:
-            webbrowser.open(o["link"])
+            webbrowser.open(textos.da_obra(o["links"], self.lingua()))
 
     def pausar(self, icone, item):
         self.cfg["pausado"] = not self.cfg["pausado"]
